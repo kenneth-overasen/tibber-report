@@ -1,0 +1,5 @@
+{
+  "query": "{\n  viewer {\nhomes {\nconsumption(resolution: HOURLY, last: 100) {\nnodes {\nfrom\nto\ncost\nunitPrice\nnitPriceVAT\nconsumption\nconsumptionUnit\n}\n}\n}\n}\n}\n",
+  "variables": null,
+  "operationName": null
+}
