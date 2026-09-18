@@ -18,7 +18,7 @@ name = f"{postalCode}_{start_date}_{end_date}"
 file = f"{Path.home()}/Desktop/{name}.csv"
 
 url = 'https://api.tibber.com/v1-beta/gql'
-token = '8vsiJTQcUlQc5a4CLIAFo-g-h-niQJD3lBAB7VK_Op0'
+token = ''
 timezone = pytz.timezone('Europe/Oslo')
 
 query = """{
