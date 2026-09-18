@@ -1,0 +1,5 @@
+# Dependencies for the original CLI script (legacy/main.py) only.
+# The current tool uses the requirements.txt in the repository root; the two
+# are deliberately separate, since nothing here ships in the Docker image.
+requests>=2.32,<3.0
+pytz>=2025.1

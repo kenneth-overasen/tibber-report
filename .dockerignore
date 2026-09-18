@@ -1,4 +1,4 @@
-ref/
+legacy/
 .git/
 .venv/
 __pycache__/

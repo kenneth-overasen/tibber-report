@@ -162,7 +162,7 @@ cost excl. VAT       = cost incl. VAT − VAT
 ```
 
 > **Note:** `cost` already contains VAT. Adding `unitPriceVAT × consumption` on
-> top of it — as the old script in `ref/` does — double-counts VAT and inflates
+> top of it — as the old script in `legacy/` does — double-counts VAT and inflates
 > the total by the VAT rate.
 
 The **VAT rate** is derived from the period's own data
@@ -263,5 +263,7 @@ app/
     styles.css
     tibber-logo.png  bundled Tibber mark (Tibber's trademark)
 tests/           unit tests
-ref/             the original CLI script, kept for reference
+legacy/          the original CLI script, kept for reference
+  main.py          the script itself
+  requirements.txt its own dependencies, separate from the root ones
 ```
