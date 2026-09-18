@@ -1,0 +1,411 @@
+"""Turns raw Tibber consumption nodes into a report.
+
+VAT model
+---------
+Tibber reports ``unitPrice`` *including* VAT and ``unitPriceVAT`` as the VAT
+share already contained in it.  So for every hour:
+
+    unit_price_incl_vat = unitPrice
+    unit_price_ex_vat   = unitPrice - unitPriceVAT
+    cost_incl_vat       = consumption * unitPrice        (== the API's `cost`)
+    vat                 = consumption * unitPriceVAT
+    cost_ex_vat         = cost_incl_vat - vat
+
+A fixed price override replaces the unit price only; consumption is untouched.
+"""
+from __future__ import annotations
+
+import math
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from .i18n import DEFAULT_LOCALE, LocalizedError, warning_text
+
+DEFAULT_VAT_RATE = 0.25
+
+
+class ReportError(LocalizedError, ValueError):
+    """Raised for invalid report parameters. Carries a catalogue key."""
+
+
+@dataclass
+class FixedPrice:
+    """A user-supplied price per kWh that overrides the spot price."""
+
+    price: float
+    includes_vat: bool = True
+    vat_rate: float | None = None  # None -> derive from the period's own data
+
+    def resolve(self, derived_vat_rate: float) -> tuple[float, float]:
+        """Return (price_incl_vat, price_ex_vat) per kWh."""
+        rate = self.vat_rate if self.vat_rate is not None else derived_vat_rate
+        if rate < 0:
+            raise ReportError("err.negative_vat")
+        if self.includes_vat:
+            incl = self.price
+            ex = self.price / (1.0 + rate)
+        else:
+            ex = self.price
+            incl = self.price * (1.0 + rate)
+        return incl, ex
+
+
+def get_zone(name: str) -> ZoneInfo:
+    try:
+        return ZoneInfo(name)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ReportError("err.unknown_timezone", name=name) from exc
+
+
+def parse_node_time(value: str) -> datetime:
+    """Parse a Tibber timestamp such as '2026-08-13T13:00:00.000+02:00'."""
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise ReportError("err.bad_timestamp", value=value) from exc
+    if parsed.tzinfo is None:
+        raise ReportError("err.no_offset", value=value)
+    return parsed
+
+
+def parse_local(value: str, zone: ZoneInfo) -> datetime:
+    """Parse a 'YYYY-MM-DDTHH:MM' (or with seconds) wall-clock time in `zone`."""
+    text = value.strip()
+    if text.endswith("Z") or "+" in text[10:]:
+        # Already absolute -- honour it as-is.
+        return parse_node_time(text)
+    for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(text, fmt).replace(tzinfo=zone)
+        except ValueError:
+            continue
+    raise ReportError("err.bad_local", value=value)
+
+
+def hours_back_from_now(start: datetime, now: datetime | None = None) -> int:
+    """How many hourly nodes to request so that `start` is covered."""
+    now = now or datetime.now(tz=start.tzinfo)
+    delta = now - start
+    if delta.total_seconds() <= 0:
+        return 1
+    # +2 for a safety margin across DST shifts and partial hours.
+    return int(math.ceil(delta.total_seconds() / 3600.0)) + 2
+
+
+def derive_vat_rate(nodes: list[dict]) -> float | None:
+    """Infer the VAT rate actually applied in the period.
+
+    Returns None when the data gives no usable signal (e.g. VAT-exempt
+    regions where every unitPriceVAT is 0, or missing prices).
+    """
+    total_ex = 0.0
+    total_vat = 0.0
+    for node in nodes:
+        unit_price = node.get("unitPrice")
+        unit_vat = node.get("unitPriceVAT")
+        if unit_price is None or unit_vat is None:
+            continue
+        total_ex += unit_price - unit_vat
+        total_vat += unit_vat
+    if total_ex <= 0:
+        return None
+    return total_vat / total_ex
+
+
+@dataclass
+class HourRow:
+    start: datetime
+    end: datetime
+    consumption: float
+    unit_price_incl_vat: float | None
+    unit_price_ex_vat: float | None
+    unit_price_vat: float | None
+    spot_cost_incl_vat: float
+    spot_cost_ex_vat: float
+    spot_vat: float
+    fixed_cost_incl_vat: float | None = None
+    fixed_cost_ex_vat: float | None = None
+    fixed_vat: float | None = None
+    estimated: bool = False  # cost computed locally, not returned by the API
+
+    def as_dict(self, locale: str | None = DEFAULT_LOCALE) -> dict:
+        return {
+            "from": self.start.isoformat(),
+            "to": self.end.isoformat(),
+            "consumption": self.consumption,
+            "unitPriceInclVat": self.unit_price_incl_vat,
+            "unitPriceExVat": self.unit_price_ex_vat,
+            "unitPriceVat": self.unit_price_vat,
+            "spotCostInclVat": self.spot_cost_incl_vat,
+            "spotCostExVat": self.spot_cost_ex_vat,
+            "spotVat": self.spot_vat,
+            "fixedCostInclVat": self.fixed_cost_incl_vat,
+            "fixedCostExVat": self.fixed_cost_ex_vat,
+            "fixedVat": self.fixed_vat,
+            "estimated": self.estimated,
+        }
+
+
+@dataclass
+class Report:
+    home: dict
+    start: datetime
+    end: datetime
+    currency: str
+    rows: list[HourRow]
+    vat_rate: float
+    vat_rate_derived: bool
+    fixed_vat_rate: float | None = None
+    fixed_price_incl_vat: float | None = None
+    fixed_price_ex_vat: float | None = None
+    warnings: list[tuple[str, dict]] = field(default_factory=list)
+    generated_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
+
+    # -- totals -----------------------------------------------------------
+    @property
+    def total_consumption(self) -> float:
+        return sum(r.consumption for r in self.rows)
+
+    @property
+    def total_spot_incl_vat(self) -> float:
+        return sum(r.spot_cost_incl_vat for r in self.rows)
+
+    @property
+    def total_spot_ex_vat(self) -> float:
+        return sum(r.spot_cost_ex_vat for r in self.rows)
+
+    @property
+    def total_spot_vat(self) -> float:
+        return sum(r.spot_vat for r in self.rows)
+
+    @property
+    def total_fixed_incl_vat(self) -> float | None:
+        if self.fixed_price_incl_vat is None:
+            return None
+        return sum(r.fixed_cost_incl_vat or 0.0 for r in self.rows)
+
+    @property
+    def total_fixed_ex_vat(self) -> float | None:
+        if self.fixed_price_ex_vat is None:
+            return None
+        return sum(r.fixed_cost_ex_vat or 0.0 for r in self.rows)
+
+    @property
+    def total_fixed_vat(self) -> float | None:
+        if self.fixed_price_incl_vat is None:
+            return None
+        return sum(r.fixed_vat or 0.0 for r in self.rows)
+
+    @property
+    def average_spot_price_incl_vat(self) -> float | None:
+        """Consumption-weighted average price per kWh."""
+        if self.total_consumption <= 0:
+            return None
+        return self.total_spot_incl_vat / self.total_consumption
+
+    @property
+    def peak_row(self) -> HourRow | None:
+        rows = [r for r in self.rows if r.consumption > 0]
+        return max(rows, key=lambda r: r.consumption) if rows else None
+
+    @property
+    def difference_incl_vat(self) -> float | None:
+        """Fixed minus spot. Positive means the fixed price costs more."""
+        total_fixed = self.total_fixed_incl_vat
+        if total_fixed is None:
+            return None
+        return total_fixed - self.total_spot_incl_vat
+
+    def rendered_warnings(self, locale: str | None = DEFAULT_LOCALE) -> list[str]:
+        return [warning_text(locale, code, params) for code, params in self.warnings]
+
+    def label(self) -> str:
+        postal = self.home.get("postalCode") or "home"
+        return (
+            f"tibber_{postal}_{self.start:%Y%m%d%H%M}_{self.end:%Y%m%d%H%M}"
+        )
+
+    def as_dict(self, locale: str | None = DEFAULT_LOCALE) -> dict:
+        return {
+            "home": self.home,
+            "period": {
+                "from": self.start.isoformat(),
+                "to": self.end.isoformat(),
+                "hours": len(self.rows),
+            },
+            "currency": self.currency,
+            "vatRate": self.vat_rate,
+            "vatRateDerived": self.vat_rate_derived,
+            "fixedVatRate": self.fixed_vat_rate,
+            "fixedPrice": (
+                None
+                if self.fixed_price_incl_vat is None
+                else {
+                    "inclVat": self.fixed_price_incl_vat,
+                    "exVat": self.fixed_price_ex_vat,
+                }
+            ),
+            "summary": {
+                "totalConsumption": self.total_consumption,
+                "spot": {
+                    "inclVat": self.total_spot_incl_vat,
+                    "exVat": self.total_spot_ex_vat,
+                    "vat": self.total_spot_vat,
+                },
+                "fixed": (
+                    None
+                    if self.fixed_price_incl_vat is None
+                    else {
+                        "inclVat": self.total_fixed_incl_vat,
+                        "exVat": self.total_fixed_ex_vat,
+                        "vat": self.total_fixed_vat,
+                    }
+                ),
+                "differenceInclVat": self.difference_incl_vat,
+                "averageSpotPriceInclVat": self.average_spot_price_incl_vat,
+                "peakHour": (
+                    None
+                    if self.peak_row is None
+                    else {
+                        "from": self.peak_row.start.isoformat(),
+                        "consumption": self.peak_row.consumption,
+                    }
+                ),
+            },
+            "hours": [r.as_dict() for r in self.rows],
+            "warnings": self.rendered_warnings(locale),
+            "warningCodes": [code for code, _ in self.warnings],
+            "generatedAt": self.generated_at.isoformat(),
+            "label": self.label(),
+        }
+
+
+def build_report(
+    *,
+    home: dict,
+    nodes: list[dict],
+    start: datetime,
+    end: datetime,
+    zone: ZoneInfo,
+    fixed_price: FixedPrice | None = None,
+    currency_fallback: str = "NOK",
+) -> Report:
+    """Filter `nodes` to [start, end) and compute per-hour and total figures."""
+    if end <= start:
+        raise ReportError("err.end_before_start")
+
+    derived = derive_vat_rate(nodes)
+    vat_rate = derived if derived is not None else DEFAULT_VAT_RATE
+    vat_rate_derived = derived is not None
+
+    fixed_incl = fixed_ex = fixed_vat_rate = None
+    if fixed_price is not None:
+        fixed_incl, fixed_ex = fixed_price.resolve(vat_rate)
+        fixed_vat_rate = (
+            fixed_price.vat_rate if fixed_price.vat_rate is not None else vat_rate
+        )
+
+    warnings: list[tuple[str, dict]] = []
+    currency = currency_fallback
+    rows: list[HourRow] = []
+    missing_price_hours = 0
+    earliest_seen: datetime | None = None
+
+    for node in nodes:
+        node_start = parse_node_time(node["from"]).astimezone(zone)
+        node_end = parse_node_time(node["to"]).astimezone(zone)
+
+        if earliest_seen is None or node_start < earliest_seen:
+            earliest_seen = node_start
+
+        # Half-open interval: an hour belongs to the period if it starts
+        # inside it and does not run past the end.
+        if node_start < start or node_end > end:
+            continue
+
+        if node.get("currency"):
+            currency = node["currency"]
+
+        consumption = node.get("consumption") or 0.0
+        unit_price = node.get("unitPrice")
+        unit_vat = node.get("unitPriceVAT")
+
+        if unit_price is None:
+            missing_price_hours += 1
+            unit_price_ex = unit_vat_value = None
+            spot_incl = spot_vat_amount = spot_ex = 0.0
+            estimated = False
+        else:
+            unit_vat = unit_vat or 0.0
+            unit_price_ex = unit_price - unit_vat
+            unit_vat_value = unit_vat
+            api_cost = node.get("cost")
+            estimated = api_cost is None
+            spot_incl = api_cost if api_cost is not None else consumption * unit_price
+            spot_vat_amount = consumption * unit_vat
+            spot_ex = spot_incl - spot_vat_amount
+
+        row = HourRow(
+            start=node_start,
+            end=node_end,
+            consumption=consumption,
+            unit_price_incl_vat=unit_price,
+            unit_price_ex_vat=unit_price_ex,
+            unit_price_vat=unit_vat_value,
+            spot_cost_incl_vat=spot_incl,
+            spot_cost_ex_vat=spot_ex,
+            spot_vat=spot_vat_amount,
+            estimated=estimated,
+        )
+
+        if fixed_incl is not None and fixed_ex is not None:
+            row.fixed_cost_incl_vat = consumption * fixed_incl
+            row.fixed_cost_ex_vat = consumption * fixed_ex
+            row.fixed_vat = row.fixed_cost_incl_vat - row.fixed_cost_ex_vat
+
+        rows.append(row)
+
+    rows.sort(key=lambda r: r.start)
+
+    if not rows:
+        warnings.append(("warn.no_data", {}))
+    else:
+        expected = int(round((end - start).total_seconds() / 3600.0))
+        if len(rows) < expected:
+            warnings.append(
+                (
+                    "warn.partial_hours",
+                    {"missing": expected - len(rows), "expected": expected},
+                )
+            )
+        if earliest_seen is not None and earliest_seen > start and len(rows) < expected:
+            warnings.append(
+                (
+                    "warn.earliest",
+                    {"timestamp": f"{earliest_seen:%Y-%m-%d %H:%M}"},
+                )
+            )
+
+    if missing_price_hours:
+        warnings.append(("warn.missing_price", {"count": missing_price_hours}))
+    explicit_rate = fixed_price is not None and fixed_price.vat_rate is not None
+    if rows and not vat_rate_derived and not explicit_rate:
+        warnings.append(("warn.vat_assumed", {"rate": DEFAULT_VAT_RATE}))
+
+    return Report(
+        home=home,
+        start=start,
+        end=end,
+        currency=currency,
+        rows=rows,
+        vat_rate=vat_rate,
+        vat_rate_derived=vat_rate_derived,
+        fixed_vat_rate=fixed_vat_rate,
+        fixed_price_incl_vat=fixed_incl,
+        fixed_price_ex_vat=fixed_ex,
+        warnings=warnings,
+    )

@@ -8,11 +8,11 @@ from pathlib import Path
 
 postalCode = "1747"
 
-start_date = '2026-05-23'
-end_date = '2026-05-25'
+start_date = '2026-08-13'
+end_date = '2026-08-16'
 
-start_hour = "11"
-end_hour = "16"
+start_hour = "13"
+end_hour = "18"
 
 name = f"{postalCode}_{start_date}_{end_date}"
 file = f"{Path.home()}/Desktop/{name}.csv"

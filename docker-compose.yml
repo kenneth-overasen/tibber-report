@@ -1,0 +1,19 @@
+services:
+  tibber-report:
+    build: .
+    image: tibber-report:latest
+    container_name: tibber-report
+    ports:
+      - "8000:8000"
+    environment:
+      # Required. Create one at https://developer.tibber.com/settings/access-token
+      TIBBER_TOKEN: ${TIBBER_TOKEN:?set TIBBER_TOKEN in .env or the environment}
+      # Optional.
+      TZ: ${TZ:-Europe/Oslo}
+      TIBBER_LANGUAGE: ${TIBBER_LANGUAGE:-en}
+      TIBBER_POSTAL_CODE: ${TIBBER_POSTAL_CODE:-}
+      TIBBER_FIXED_PRICE: ${TIBBER_FIXED_PRICE:-}
+      TIBBER_FIXED_PRICE_INCLUDES_VAT: ${TIBBER_FIXED_PRICE_INCLUDES_VAT:-true}
+      TIBBER_ALLOW_TOKEN_OVERRIDE: ${TIBBER_ALLOW_TOKEN_OVERRIDE:-true}
+      TIBBER_MAX_LOOKBACK_HOURS: ${TIBBER_MAX_LOOKBACK_HOURS:-26280}
+    restart: unless-stopped

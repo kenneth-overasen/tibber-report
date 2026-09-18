@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tibber consumption report</title>
+<link rel="stylesheet" href="/static/styles.css">
+<link rel="icon" type="image/png" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo.png">
+</head>
+<body>
+<header class="topbar">
+  <div class="wrap topbar-inner">
+    <div class="brand"><img src="/logo.png" alt="" class="logo" width="32" height="32"> <span data-i18n="ui.brand">Tibber consumption report</span></div>
+    <div class="topbar-right">
+      <label class="lang">
+        <span class="sr-only" data-i18n="ui.language">Language</span>
+        <select id="lang" aria-label="Language">
+          <option value="en">English</option>
+          <option value="nb">Norsk</option>
+        </select>
+      </label>
+      <div id="token-state" class="pill"></div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <form id="form" class="card panel">
+    <div class="grid">
+      <label class="field span2">
+        <span data-i18n="ui.home">Home</span>
+        <select id="home" name="home"></select>
+        <small id="home-hint" class="hint" data-i18n="ui.homes_loading">Loading homes from Tibber…</small>
+      </label>
+
+      <label class="field">
+        <span data-i18n="ui.from">From</span>
+        <div class="split">
+          <input type="date" id="start-date" required>
+          <input type="time" id="start-time" step="3600" value="00:00" required>
+        </div>
+      </label>
+
+      <label class="field">
+        <span><span data-i18n="ui.to">To</span> <em data-i18n="ui.to_note">(exclusive)</em></span>
+        <div class="split">
+          <input type="date" id="end-date" required>
+          <input type="time" id="end-time" step="3600" value="00:00" required>
+        </div>
+      </label>
+
+      <fieldset class="field span2 fixed-block">
+        <legend><span data-i18n="ui.fixed_legend">Fixed price override</span> <em data-i18n="ui.optional">(optional)</em></legend>
+        <div class="fixed-grid">
+          <label class="inline-check">
+            <input type="checkbox" id="fixed-enabled">
+            <span data-i18n="ui.fixed_enable">Use a fixed price per kWh</span>
+          </label>
+          <label class="field compact">
+            <span data-i18n="ui.price_per_kwh">Price per kWh</span>
+            <input type="number" id="fixed-price" step="0.0001" min="0" placeholder="1.2500" disabled>
+          </label>
+          <label class="field compact">
+            <span data-i18n="ui.price_is">Price is</span>
+            <select id="fixed-vat-mode" disabled>
+              <option value="incl" data-i18n="ui.incl_vat">including VAT</option>
+              <option value="ex" data-i18n="ui.excl_vat">excluding VAT</option>
+            </select>
+          </label>
+          <label class="field compact">
+            <span data-i18n="ui.vat_rate">VAT rate %</span>
+            <input type="number" id="vat-rate" step="0.1" min="0" data-i18n-placeholder="ui.auto" placeholder="auto" disabled>
+          </label>
+        </div>
+        <small class="hint" data-i18n="ui.vat_hint">Leave the VAT rate empty to use the rate derived from the API data.</small>
+      </fieldset>
+
+      <div class="quick span2">
+        <span class="hint" data-i18n="ui.quick_ranges">Quick ranges:</span>
+        <button type="button" class="chip" data-range="yesterday" data-i18n="ui.yesterday">Yesterday</button>
+        <button type="button" class="chip" data-range="last7" data-i18n="ui.last7">Last 7 days</button>
+        <button type="button" class="chip" data-range="thismonth" data-i18n="ui.this_month">This month</button>
+        <button type="button" class="chip" data-range="lastmonth" data-i18n="ui.last_month">Last month</button>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button type="submit" class="primary" id="submit" data-i18n="ui.generate">Generate report</button>
+      <button type="button" id="dl-pdf" class="ghost" disabled data-i18n="ui.download_pdf">Download PDF</button>
+      <button type="button" id="dl-csv" class="ghost" disabled data-i18n="ui.download_csv">Download CSV</button>
+      <button type="button" id="dl-json" class="ghost" disabled data-i18n="ui.download_json">Download JSON</button>
+      <span class="spacer"></span>
+      <button type="button" id="reset" class="link" data-i18n="ui.reset">Reset saved settings</button>
+    </div>
+    <small class="hint saved-note" data-i18n="ui.settings_saved">Settings are remembered in this browser.</small>
+  </form>
+
+  <div id="token-form" class="card panel hidden">
+    <h2 data-i18n="ui.api_token">API token</h2>
+    <p class="hint" data-i18n="ui.token_hint">No TIBBER_TOKEN is configured on the server.</p>
+    <div class="token-row">
+      <input type="password" id="token" data-i18n-placeholder="ui.token_placeholder" placeholder="Tibber personal access token" autocomplete="off">
+      <button type="button" id="token-save" class="primary" data-i18n="ui.token_save">Use token</button>
+    </div>
+  </div>
+
+  <div id="error" class="card error hidden"></div>
+  <div id="loading" class="card loading hidden"><span class="spinner"></span> <span data-i18n="ui.loading">Fetching consumption from Tibber…</span></div>
+
+  <section id="result" class="hidden">
+    <div class="card">
+      <div class="result-head">
+        <div>
+          <h2 id="result-title" data-i18n="ui.report">Report</h2>
+          <p id="result-sub" class="hint"></p>
+        </div>
+      </div>
+
+      <div id="tiles" class="tiles"></div>
+      <div id="warnings"></div>
+
+      <h3 class="section-title" data-i18n="ui.cost_summary">Cost summary</h3>
+      <table class="summary" id="summary-table"></table>
+    </div>
+
+    <div class="card">
+      <div class="detail-head">
+        <h3 class="section-title" data-i18n="ui.hourly_detail">Hourly detail</h3>
+        <label class="inline-check">
+          <input type="checkbox" id="hide-empty">
+          <span data-i18n="ui.hide_empty">Hide hours with no consumption</span>
+        </label>
+      </div>
+      <div class="table-scroll">
+        <table class="detail" id="detail-table"></table>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="/static/i18n.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

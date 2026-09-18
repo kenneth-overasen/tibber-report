@@ -1,33 +1,11 @@
-# Environment variables
-.env
-.env.local
-.env.*.local
-
-# Cache files
-cache/*
-
-# Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-.ruff_cache/
+*.pyc
 .venv/
-venv/
-
-# Node
-node_modules/
-package-lock.json
-
-# IDE
-.idea/
-*.swp
-*.swo
-
-# OS
+.env
 .DS_Store
-Thumbs.db
 
-# Git
-.git/
+.pytest_cache/
+
+# Saved Docker images (docker save) and other build artefacts
+*.tar
+*.tar.gz
