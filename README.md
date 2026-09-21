@@ -96,7 +96,6 @@ Everything is an environment variable; only `TIBBER_TOKEN` is required.
 | `TIBBER_LANGUAGE` | `en` | Starting language: `en` or `nb`. |
 | `TIBBER_POSTAL_CODE` | — | Pre-selects this home in the UI. |
 | `TIBBER_FIXED_PRICE` | — | Pre-fills the fixed-price override, per kWh. |
-| `TIBBER_FIXED_PRICE_INCLUDES_VAT` | `true` | Whether that price includes VAT. |
 | `TIBBER_ALLOW_TOKEN_OVERRIDE` | `true` | Set `false` to forbid entering a token in the UI. |
 | `TIBBER_MAX_LOOKBACK_HOURS` | `26280` (3 years) | Guard against enormous queries. |
 
@@ -112,8 +111,7 @@ is never written to disk on the server.
    `2026-08-16 18:00` covers the hour starting 13:00 through the hour starting
    17:00. The quick-range chips fill in common periods.
 3. Optionally tick **Use a fixed price per kWh** and enter your contract price.
-   Say whether that price includes VAT. Leave the VAT rate empty to use the rate
-   derived from the API's own numbers.
+   It is used exactly as entered — VAT does not apply to a fixed price.
 4. **Generate report**, then download PDF / CSV / JSON.
 
 ### Language
@@ -132,7 +130,7 @@ Scripted callers can pass `"lang": "nb"` in the request body, or send an
 
 ### Remembered settings
 
-The selected home, fixed price (and its VAT handling), start/end times, the
+The selected home, fixed price, start/end times, the
 "hide empty hours" toggle and the language are saved in the browser's
 `localStorage`, so they come back on the next visit. **Reset saved settings**
 clears them and returns to the server-side defaults.
@@ -171,13 +169,16 @@ The **VAT rate** is derived from the period's own data
 falls back to 25 % only when the data gives no signal, and you can always
 override it in the UI.
 
-A **fixed price** replaces the unit price but not the consumption:
+A **fixed price** replaces the unit price but not the consumption. VAT does not
+apply to it, so there is nothing to add or split out:
 
 ```
-fixed incl. VAT = consumption × fixed price incl. VAT
-fixed excl. VAT = consumption × fixed price excl. VAT
-difference      = fixed total − spot total     (positive ⇒ fixed costs more)
+fixed total = consumption × fixed price
+difference  = fixed total − spot total incl. VAT  (positive ⇒ fixed costs more)
 ```
+
+The difference is measured against the spot total *including* VAT, since that is
+what the spot contract actually costs.
 
 Prices cover **energy only** — grid rent, fixed monthly fees and production
 rewards are not part of the Tibber `cost` field and are not in the report.
@@ -203,9 +204,7 @@ All three `report` endpoints take the same body:
   "home_id": "…",                 // or "postal_code": "1747"
   "start": "2026-08-13T13:00",    // local wall clock
   "end": "2026-08-16T18:00",      // exclusive
-  "fixed_price": 1.25,            // optional
-  "fixed_price_includes_vat": true,
-  "vat_rate": 0.25,               // optional; default is derived from the data
+  "fixed_price": 1.25,            // optional; per kWh, VAT does not apply
   "timezone": "Europe/Oslo",      // optional; default is the home's own zone
   "token": "…",                   // optional; overrides TIBBER_TOKEN
   "lang": "nb"                    // optional; 'en' or 'nb'
@@ -238,7 +237,7 @@ caps that.
 .venv/bin/python -m pytest tests -q
 ```
 
-The tests cover the VAT arithmetic, fixed-price conversion, period filtering,
+The tests cover the VAT arithmetic, fixed-price costing, period filtering,
 timestamp parsing and both export formats — no network access needed.
 
 They also guard the translations: both locales must define the same keys with

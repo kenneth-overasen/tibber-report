@@ -53,13 +53,8 @@ class ReportRequest(BaseModel):
     start: str = Field(description="Local start, YYYY-MM-DD or YYYY-MM-DDTHH:MM")
     end: str = Field(description="Local end (exclusive), same format as start")
     fixed_price: float | None = Field(
-        default=None, description="Override price per kWh. Omit to use spot only."
-    )
-    fixed_price_includes_vat: bool = True
-    vat_rate: float | None = Field(
         default=None,
-        description="Override the VAT rate as a fraction, e.g. 0.25. "
-        "Defaults to the rate derived from the API data.",
+        description="Override price per kWh, VAT-free. Omit to use spot only.",
     )
     timezone: str | None = Field(
         default=None, description="IANA zone. Defaults to the home's own time zone."
@@ -167,13 +162,7 @@ async def _build(req: ReportRequest) -> Report:
     if req.fixed_price is not None:
         if req.fixed_price < 0:
             raise ApiError("err.negative_price")
-        fixed = FixedPrice(
-            price=req.fixed_price,
-            includes_vat=req.fixed_price_includes_vat,
-            vat_rate=req.vat_rate,
-        )
-    elif req.vat_rate is not None and req.vat_rate < 0:
-        raise ApiError("err.negative_vat")
+        fixed = FixedPrice(price=req.fixed_price)
 
     merged_home = {**home, **{k: v for k, v in payload["home"].items() if v}}
 
@@ -229,7 +218,6 @@ async def get_config() -> dict:
         "allowTokenOverride": settings.allow_token_override,
         "defaultPostalCode": settings.default_postal_code,
         "defaultFixedPrice": settings.default_fixed_price,
-        "defaultFixedPriceIncludesVat": settings.default_fixed_price_includes_vat,
         "timezone": settings.timezone,
     }
 

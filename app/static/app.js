@@ -34,8 +34,6 @@ function savePrefs() {
     endTime: $("end-time").value,
     fixedEnabled: $("fixed-enabled").checked,
     fixedPrice: $("fixed-price").value,
-    fixedVatMode: $("fixed-vat-mode").value,
-    vatRate: $("vat-rate").value,
     hideEmpty: $("hide-empty").checked,
   };
   try {
@@ -162,9 +160,6 @@ function buildRequest() {
     const price = parseFloat($("fixed-price").value);
     if (!Number.isFinite(price)) throw new Error(t("err.pick_price"));
     body.fixed_price = price;
-    body.fixed_price_includes_vat = $("fixed-vat-mode").value === "incl";
-    const vat = parseFloat($("vat-rate").value);
-    if (Number.isFinite(vat)) body.vat_rate = vat / 100;
   }
 
   const token = sessionToken();
@@ -212,8 +207,8 @@ function renderTiles(report) {
   ];
 
   if (s.fixed) {
-    tiles.splice(3, 0, { k: t("ui.tile_fixed_incl"), v: fmt(s.fixed.inclVat), u: cur });
-    const diff = s.differenceInclVat ?? 0;
+    tiles.splice(3, 0, { k: t("ui.tile_fixed"), v: fmt(s.fixed.total), u: cur });
+    const diff = s.difference ?? 0;
     tiles.push({
       k: t("ui.tile_diff"),
       v: `${diff >= 0 ? "+" : "−"}${fmt(Math.abs(diff))}`,
@@ -230,15 +225,6 @@ function renderTiles(report) {
     .join("");
 }
 
-function sameVatRate(report) {
-  return (
-    !report.fixedPrice ||
-    report.fixedVatRate === null ||
-    report.fixedVatRate === undefined ||
-    Math.abs(report.fixedVatRate - report.vatRate) < 1e-9
-  );
-}
-
 function renderSummary(report) {
   const cur = report.currency;
   const s = report.summary;
@@ -253,22 +239,20 @@ function renderSummary(report) {
       hasFixed ? `<td>${fmt(fixed)}</td>` : ""
     }</tr>`;
 
-  const vatLabel = sameVatRate(report)
-    ? t("ui.row_vat_rate", { rate: pct(report.vatRate) })
-    : t("ui.row_vat");
-
+  // The VAT split belongs to the spot price only: a fixed price is VAT-free,
+  // so its column is blank until the total line.
   $("summary-table").innerHTML =
     head +
     "<tbody>" +
-    row(t("ui.row_excl"), s.spot.exVat, s.fixed?.exVat) +
-    row(vatLabel, s.spot.vat, s.fixed?.vat) +
-    row(t("ui.row_total"), s.spot.inclVat, s.fixed?.inclVat) +
+    row(t("ui.row_excl"), s.spot.exVat, null) +
+    row(t("ui.row_vat_rate", { rate: pct(report.vatRate) }), s.spot.vat, null) +
+    row(t("ui.row_total"), s.spot.inclVat, s.fixed?.total) +
     "</tbody>";
 }
 
 function renderDetail(report) {
   const cur = report.currency;
-  const hasFixed = Boolean(report.fixedPrice);
+  const hasFixed = report.fixedPrice !== null && report.fixedPrice !== undefined;
   const hideEmpty = $("hide-empty").checked;
   const rows = hideEmpty
     ? report.hours.filter((h) => (h.consumption || 0) > 0)
@@ -295,7 +279,7 @@ function renderDetail(report) {
         <td>${fmt(h.spotCostExVat)}</td>
         <td>${fmt(h.spotVat)}</td>
         <td>${fmt(h.spotCostInclVat)}</td>
-        ${hasFixed ? `<td>${fmt(h.fixedCostInclVat)}</td>` : ""}
+        ${hasFixed ? `<td>${fmt(h.fixedCost)}</td>` : ""}
       </tr>`;
     })
     .join("");
@@ -308,7 +292,7 @@ function renderDetail(report) {
     <td>${fmt(s.spot.exVat)}</td>
     <td>${fmt(s.spot.vat)}</td>
     <td>${fmt(s.spot.inclVat)}</td>
-    ${hasFixed ? `<td>${fmt(s.fixed.inclVat)}</td>` : ""}
+    ${hasFixed ? `<td>${fmt(s.fixed.total)}</td>` : ""}
   </tr></tfoot>`;
 
   $("detail-table").innerHTML =
@@ -335,8 +319,13 @@ function renderReport(report) {
       source: report.vatRateDerived ? t("ui.vat_from_api") : t("ui.vat_assumed"),
     }),
   ];
-  if (!sameVatRate(report)) {
-    parts.push(t("ui.sub_fixed_vat", { rate: pct(report.fixedVatRate) }));
+  if (report.fixedPrice !== null && report.fixedPrice !== undefined) {
+    parts.push(
+      t("ui.sub_fixed_price", {
+        price: fmt(report.fixedPrice, 4),
+        currency: report.currency,
+      })
+    );
   }
   $("result-sub").textContent = parts.join(" · ");
 
@@ -440,8 +429,7 @@ function applyQuickRange(kind) {
 }
 
 function toggleFixed() {
-  const on = $("fixed-enabled").checked;
-  for (const id of ["fixed-price", "fixed-vat-mode", "vat-rate"]) $(id).disabled = !on;
+  $("fixed-price").disabled = !$("fixed-enabled").checked;
 }
 
 /* -------------------------------------------------------------- boot ---- */
@@ -504,8 +492,6 @@ function restorePrefs(prefs) {
   if (prefs.fixedEnabled) {
     $("fixed-enabled").checked = true;
     if (prefs.fixedPrice) $("fixed-price").value = prefs.fixedPrice;
-    if (prefs.fixedVatMode) $("fixed-vat-mode").value = prefs.fixedVatMode;
-    if (prefs.vatRate) $("vat-rate").value = prefs.vatRate;
   }
   if (prefs.hideEmpty) $("hide-empty").checked = true;
   toggleFixed();
@@ -533,9 +519,6 @@ async function init() {
   ) {
     $("fixed-enabled").checked = true;
     $("fixed-price").value = state.config.defaultFixedPrice;
-    $("fixed-vat-mode").value = state.config.defaultFixedPriceIncludesVat
-      ? "incl"
-      : "ex";
   }
 
   restorePrefs(prefs);
@@ -578,7 +561,7 @@ $("reset").addEventListener("click", () => {
   clearPrefs();
   location.reload();
 });
-for (const id of ["home", "start-time", "end-time", "fixed-price", "fixed-vat-mode", "vat-rate"]) {
+for (const id of ["home", "start-time", "end-time", "fixed-price"]) {
   $(id).addEventListener("change", savePrefs);
 }
 for (const chip of document.querySelectorAll(".chip")) {

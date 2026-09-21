@@ -61,19 +61,8 @@
             <span data-i18n="ui.price_per_kwh">Price per kWh</span>
             <input type="number" id="fixed-price" step="0.0001" min="0" placeholder="1.2500" disabled>
           </label>
-          <label class="field compact">
-            <span data-i18n="ui.price_is">Price is</span>
-            <select id="fixed-vat-mode" disabled>
-              <option value="incl" data-i18n="ui.incl_vat">including VAT</option>
-              <option value="ex" data-i18n="ui.excl_vat">excluding VAT</option>
-            </select>
-          </label>
-          <label class="field compact">
-            <span data-i18n="ui.vat_rate">VAT rate %</span>
-            <input type="number" id="vat-rate" step="0.1" min="0" data-i18n-placeholder="ui.auto" placeholder="auto" disabled>
-          </label>
         </div>
-        <small class="hint" data-i18n="ui.vat_hint">Leave the VAT rate empty to use the rate derived from the API data.</small>
+        <small class="hint" data-i18n="ui.fixed_hint">A fixed price is a flat price per kWh; VAT is not added to it.</small>
       </fieldset>
 
       <div class="quick span2">

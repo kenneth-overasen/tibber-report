@@ -116,10 +116,11 @@ input:disabled, select:disabled { opacity: 0.5; }
   text-transform: uppercase; letter-spacing: 0.04em; padding: 0 6px;
 }
 .fixed-grid {
-  display: grid; grid-template-columns: auto 1fr 1fr 1fr;
-  gap: 12px; align-items: end;
+  /* checkbox, price, then a filler track that absorbs the leftover width */
+  display: grid; grid-template-columns: max-content minmax(140px, 220px) 1fr;
+  gap: 12px 20px; align-items: end;
 }
-@media (max-width: 760px) { .fixed-grid { grid-template-columns: 1fr 1fr; } }
+@media (max-width: 760px) { .fixed-grid { grid-template-columns: 1fr; } }
 
 .inline-check {
   display: flex; align-items: center; gap: 8px; font-size: 13px;

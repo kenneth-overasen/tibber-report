@@ -12,6 +12,8 @@ share already contained in it.  So for every hour:
     cost_ex_vat         = cost_incl_vat - vat
 
 A fixed price override replaces the unit price only; consumption is untouched.
+The override is a plain price per kWh -- VAT does not apply to it, so its cost
+is simply consumption x price, with no VAT split.
 """
 from __future__ import annotations
 
@@ -31,24 +33,13 @@ class ReportError(LocalizedError, ValueError):
 
 @dataclass
 class FixedPrice:
-    """A user-supplied price per kWh that overrides the spot price."""
+    """A user-supplied price per kWh that overrides the spot price.
+
+    It is a flat contract price: no VAT is added to it and none is split out
+    of it.
+    """
 
     price: float
-    includes_vat: bool = True
-    vat_rate: float | None = None  # None -> derive from the period's own data
-
-    def resolve(self, derived_vat_rate: float) -> tuple[float, float]:
-        """Return (price_incl_vat, price_ex_vat) per kWh."""
-        rate = self.vat_rate if self.vat_rate is not None else derived_vat_rate
-        if rate < 0:
-            raise ReportError("err.negative_vat")
-        if self.includes_vat:
-            incl = self.price
-            ex = self.price / (1.0 + rate)
-        else:
-            ex = self.price
-            incl = self.price * (1.0 + rate)
-        return incl, ex
 
 
 def get_zone(name: str) -> ZoneInfo:
@@ -127,9 +118,7 @@ class HourRow:
     spot_cost_incl_vat: float
     spot_cost_ex_vat: float
     spot_vat: float
-    fixed_cost_incl_vat: float | None = None
-    fixed_cost_ex_vat: float | None = None
-    fixed_vat: float | None = None
+    fixed_cost: float | None = None  # consumption x fixed price, no VAT
     estimated: bool = False  # cost computed locally, not returned by the API
 
     def as_dict(self, locale: str | None = DEFAULT_LOCALE) -> dict:
@@ -143,9 +132,7 @@ class HourRow:
             "spotCostInclVat": self.spot_cost_incl_vat,
             "spotCostExVat": self.spot_cost_ex_vat,
             "spotVat": self.spot_vat,
-            "fixedCostInclVat": self.fixed_cost_incl_vat,
-            "fixedCostExVat": self.fixed_cost_ex_vat,
-            "fixedVat": self.fixed_vat,
+            "fixedCost": self.fixed_cost,
             "estimated": self.estimated,
         }
 
@@ -159,9 +146,7 @@ class Report:
     rows: list[HourRow]
     vat_rate: float
     vat_rate_derived: bool
-    fixed_vat_rate: float | None = None
-    fixed_price_incl_vat: float | None = None
-    fixed_price_ex_vat: float | None = None
+    fixed_price: float | None = None  # per kWh, VAT does not apply
     warnings: list[tuple[str, dict]] = field(default_factory=list)
     generated_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
 
@@ -183,22 +168,10 @@ class Report:
         return sum(r.spot_vat for r in self.rows)
 
     @property
-    def total_fixed_incl_vat(self) -> float | None:
-        if self.fixed_price_incl_vat is None:
+    def total_fixed(self) -> float | None:
+        if self.fixed_price is None:
             return None
-        return sum(r.fixed_cost_incl_vat or 0.0 for r in self.rows)
-
-    @property
-    def total_fixed_ex_vat(self) -> float | None:
-        if self.fixed_price_ex_vat is None:
-            return None
-        return sum(r.fixed_cost_ex_vat or 0.0 for r in self.rows)
-
-    @property
-    def total_fixed_vat(self) -> float | None:
-        if self.fixed_price_incl_vat is None:
-            return None
-        return sum(r.fixed_vat or 0.0 for r in self.rows)
+        return sum(r.fixed_cost or 0.0 for r in self.rows)
 
     @property
     def average_spot_price_incl_vat(self) -> float | None:
@@ -213,9 +186,12 @@ class Report:
         return max(rows, key=lambda r: r.consumption) if rows else None
 
     @property
-    def difference_incl_vat(self) -> float | None:
-        """Fixed minus spot. Positive means the fixed price costs more."""
-        total_fixed = self.total_fixed_incl_vat
+    def difference(self) -> float | None:
+        """Fixed minus spot incl. VAT -- what each contract actually costs.
+
+        Positive means the fixed price costs more.
+        """
+        total_fixed = self.total_fixed
         if total_fixed is None:
             return None
         return total_fixed - self.total_spot_incl_vat
@@ -240,15 +216,7 @@ class Report:
             "currency": self.currency,
             "vatRate": self.vat_rate,
             "vatRateDerived": self.vat_rate_derived,
-            "fixedVatRate": self.fixed_vat_rate,
-            "fixedPrice": (
-                None
-                if self.fixed_price_incl_vat is None
-                else {
-                    "inclVat": self.fixed_price_incl_vat,
-                    "exVat": self.fixed_price_ex_vat,
-                }
-            ),
+            "fixedPrice": self.fixed_price,
             "summary": {
                 "totalConsumption": self.total_consumption,
                 "spot": {
@@ -258,14 +226,10 @@ class Report:
                 },
                 "fixed": (
                     None
-                    if self.fixed_price_incl_vat is None
-                    else {
-                        "inclVat": self.total_fixed_incl_vat,
-                        "exVat": self.total_fixed_ex_vat,
-                        "vat": self.total_fixed_vat,
-                    }
+                    if self.fixed_price is None
+                    else {"total": self.total_fixed}
                 ),
-                "differenceInclVat": self.difference_incl_vat,
+                "difference": self.difference,
                 "averageSpotPriceInclVat": self.average_spot_price_incl_vat,
                 "peakHour": (
                     None
@@ -302,12 +266,7 @@ def build_report(
     vat_rate = derived if derived is not None else DEFAULT_VAT_RATE
     vat_rate_derived = derived is not None
 
-    fixed_incl = fixed_ex = fixed_vat_rate = None
-    if fixed_price is not None:
-        fixed_incl, fixed_ex = fixed_price.resolve(vat_rate)
-        fixed_vat_rate = (
-            fixed_price.vat_rate if fixed_price.vat_rate is not None else vat_rate
-        )
+    fixed_unit_price = fixed_price.price if fixed_price is not None else None
 
     warnings: list[tuple[str, dict]] = []
     currency = currency_fallback
@@ -362,10 +321,8 @@ def build_report(
             estimated=estimated,
         )
 
-        if fixed_incl is not None and fixed_ex is not None:
-            row.fixed_cost_incl_vat = consumption * fixed_incl
-            row.fixed_cost_ex_vat = consumption * fixed_ex
-            row.fixed_vat = row.fixed_cost_incl_vat - row.fixed_cost_ex_vat
+        if fixed_unit_price is not None:
+            row.fixed_cost = consumption * fixed_unit_price
 
         rows.append(row)
 
@@ -392,8 +349,7 @@ def build_report(
 
     if missing_price_hours:
         warnings.append(("warn.missing_price", {"count": missing_price_hours}))
-    explicit_rate = fixed_price is not None and fixed_price.vat_rate is not None
-    if rows and not vat_rate_derived and not explicit_rate:
+    if rows and not vat_rate_derived:
         warnings.append(("warn.vat_assumed", {"rate": DEFAULT_VAT_RATE}))
 
     return Report(
@@ -404,8 +360,6 @@ def build_report(
         rows=rows,
         vat_rate=vat_rate,
         vat_rate_derived=vat_rate_derived,
-        fixed_vat_rate=fixed_vat_rate,
-        fixed_price_incl_vat=fixed_incl,
-        fixed_price_ex_vat=fixed_ex,
+        fixed_price=fixed_unit_price,
         warnings=warnings,
     )

@@ -46,8 +46,8 @@ def test_no_translation_is_left_as_the_english_string():
     allowed = {
         "rep.kwh", "rep.vat", "rep.spot", "rep.currency", "rep.total",
         "rep.spot_currency", "rep.hour", "rep.note", "rep.notes",
-        "rep.unit_price_short", "rep.fixed_vat_extra", "rep.per_kwh_incl",
-        "rep.per_kwh_excl", "rep.fixed_detail", "rep.page",
+        "rep.unit_price_short", "rep.per_kwh_incl",
+        "rep.per_kwh_excl", "rep.page",
     }
     identical = [
         key

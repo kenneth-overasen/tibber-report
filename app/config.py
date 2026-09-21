@@ -25,9 +25,6 @@ class Settings:
         # Pre-fills in the UI.
         self.default_postal_code = os.getenv("TIBBER_POSTAL_CODE", "").strip()
         self.default_fixed_price = _float_or_none("TIBBER_FIXED_PRICE")
-        self.default_fixed_price_includes_vat = os.getenv(
-            "TIBBER_FIXED_PRICE_INCLUDES_VAT", "true"
-        ).strip().lower() in ("1", "true", "yes")
         self.timezone = os.getenv("TZ", "Europe/Oslo").strip() or "Europe/Oslo"
         # Language the UI and reports start in; the UI can switch at any time.
         self.default_language = normalize_locale(os.getenv("TIBBER_LANGUAGE"))
