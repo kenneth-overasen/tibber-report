@@ -56,6 +56,11 @@ class ReportRequest(BaseModel):
         default=None,
         description="Override price per kWh, VAT-free. Omit to use spot only.",
     )
+    fixed_only: bool = Field(
+        default=False,
+        description="Report the fixed price alone, without the spot "
+        "comparison. Ignored unless fixed_price is given.",
+    )
     timezone: str | None = Field(
         default=None, description="IANA zone. Defaults to the home's own time zone."
     )
@@ -173,6 +178,7 @@ async def _build(req: ReportRequest) -> Report:
         end=end,
         zone=zone,
         fixed_price=fixed,
+        fixed_only=req.fixed_only,
         currency_fallback=(payload["pageInfo"] or {}).get("currency")
         or home.get("currency")
         or "NOK",

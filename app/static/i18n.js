@@ -18,9 +18,10 @@ const I18N = {
     "ui.optional": "(optional)",
     "ui.fixed_enable": "Use a fixed price per kWh",
     "ui.price_per_kwh": "Price per kWh",
+    "ui.fixed_only": "Report the fixed price only, without the spot comparison",
     "ui.fixed_hint":
-      "A fixed price is a flat price per kWh; VAT is not added to it. It is " +
-      "compared against what the spot price actually costs, incl. VAT.",
+      "A fixed price is a flat price per kWh; VAT is not added to it. Any " +
+      "comparison is against what the spot price actually costs, incl. VAT.",
     "ui.quick_ranges": "Quick ranges:",
     "ui.yesterday": "Yesterday",
     "ui.last7": "Last 7 days",
@@ -52,6 +53,7 @@ const I18N = {
     "ui.tile_spot_incl": "Spot incl. VAT",
     "ui.tile_spot_excl": "Spot excl. VAT",
     "ui.tile_fixed": "Fixed total",
+    "ui.tile_price": "Fixed price",
     "ui.tile_avg": "Avg. price incl. VAT",
     "ui.tile_diff": "Fixed − spot",
     "ui.col_hour": "Hour",
@@ -71,6 +73,7 @@ const I18N = {
     "ui.sub_hours": "{count} hour(s) with data",
     "ui.sub_spot_vat": "spot VAT {rate} ({source})",
     "ui.sub_fixed_price": "fixed {price} {currency}/kWh, VAT-free",
+    "ui.sub_fixed_only": "fixed price only",
     "ui.vat_from_api": "from API data",
     "ui.vat_assumed": "assumed",
     // client-side validation
@@ -94,9 +97,10 @@ const I18N = {
     "ui.optional": "(valgfritt)",
     "ui.fixed_enable": "Bruk fastpris per kWh",
     "ui.price_per_kwh": "Pris per kWh",
+    "ui.fixed_only": "Rapporter kun fastprisen, uten sammenligning mot spot",
     "ui.fixed_hint":
-      "Fastpris er en flat pris per kWh; MVA legges ikke til. Den " +
-      "sammenlignes med hva spotprisen faktisk koster, inkl. MVA.",
+      "Fastpris er en flat pris per kWh; MVA legges ikke til. Eventuell " +
+      "sammenligning er mot hva spotprisen faktisk koster, inkl. MVA.",
     "ui.quick_ranges": "Hurtigvalg:",
     "ui.yesterday": "I går",
     "ui.last7": "Siste 7 dager",
@@ -127,6 +131,7 @@ const I18N = {
     "ui.tile_spot_incl": "Spot inkl. MVA",
     "ui.tile_spot_excl": "Spot eks. MVA",
     "ui.tile_fixed": "Fastpris totalt",
+    "ui.tile_price": "Fastpris",
     "ui.tile_avg": "Snittpris inkl. MVA",
     "ui.tile_diff": "Fastpris − spot",
     "ui.col_hour": "Time",
@@ -146,6 +151,7 @@ const I18N = {
     "ui.sub_hours": "{count} time(r) med data",
     "ui.sub_spot_vat": "spot-MVA {rate} ({source})",
     "ui.sub_fixed_price": "fastpris {price} {currency}/kWh, uten MVA",
+    "ui.sub_fixed_only": "kun fastpris",
     "ui.vat_from_api": "fra API-data",
     "ui.vat_assumed": "antatt",
     "err.pick_dates": "Velg både start- og sluttdato.",

@@ -120,6 +120,7 @@ input:disabled, select:disabled { opacity: 0.5; }
   display: grid; grid-template-columns: max-content minmax(140px, 220px) 1fr;
   gap: 12px 20px; align-items: end;
 }
+.fixed-grid .span-all { grid-column: 1 / -1; }
 @media (max-width: 760px) { .fixed-grid { grid-template-columns: 1fr; } }
 
 .inline-check {

@@ -73,6 +73,7 @@ CATALOGUE: dict[str, dict[str, str]] = {
         "rep.consumption": "Consumption",
         "rep.spot_tile": "Spot total incl. VAT",
         "rep.fixed_tile": "Fixed total",
+        "rep.price_tile": "Fixed price",
         "rep.avg_tile": "Avg. price incl. VAT",
         "rep.difference_tile": "Fixed - spot",
         "rep.notes": "Notes",
@@ -80,6 +81,11 @@ CATALOGUE: dict[str, dict[str, str]] = {
         "rep.disclaimer": (
             "Prices are Tibber spot prices for energy. Grid rent, fixed monthly "
             "fees and any production reward are not included."
+        ),
+        "rep.disclaimer_fixed": (
+            "Costs are the entered fixed price applied to metered consumption, "
+            "for energy only. Grid rent, fixed monthly fees and any production "
+            "reward are not included."
         ),
         "rep.page": "Page {page}",
         "rep.footer": "Generated from the Tibber API",
@@ -198,6 +204,7 @@ CATALOGUE: dict[str, dict[str, str]] = {
         "rep.consumption": "Forbruk",
         "rep.spot_tile": "Spot totalt inkl. MVA",
         "rep.fixed_tile": "Fastpris totalt",
+        "rep.price_tile": "Fastpris",
         "rep.avg_tile": "Snittpris inkl. MVA",
         "rep.difference_tile": "Fastpris - spot",
         "rep.notes": "Merknader",
@@ -205,6 +212,11 @@ CATALOGUE: dict[str, dict[str, str]] = {
         "rep.disclaimer": (
             "Prisene er Tibbers spotpriser for energi. Nettleie, faste "
             "månedsgebyrer og eventuell produksjonsgodtgjørelse er ikke inkludert."
+        ),
+        "rep.disclaimer_fixed": (
+            "Kostnadene er den oppgitte fastprisen anvendt på målt forbruk, kun "
+            "for energi. Nettleie, faste månedsgebyrer og eventuell "
+            "produksjonsgodtgjørelse er ikke inkludert."
         ),
         "rep.page": "Side {page}",
         "rep.footer": "Generert fra Tibber-API-et",

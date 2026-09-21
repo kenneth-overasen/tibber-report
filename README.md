@@ -112,6 +112,8 @@ is never written to disk on the server.
    17:00. The quick-range chips fill in common periods.
 3. Optionally tick **Use a fixed price per kWh** and enter your contract price.
    It is used exactly as entered — VAT does not apply to a fixed price.
+   Tick **Report the fixed price only** to drop the spot comparison and report
+   the fixed price on its own.
 4. **Generate report**, then download PDF / CSV / JSON.
 
 ### Language
@@ -130,8 +132,8 @@ Scripted callers can pass `"lang": "nb"` in the request body, or send an
 
 ### Remembered settings
 
-The selected home, fixed price, start/end times, the
-"hide empty hours" toggle and the language are saved in the browser's
+The selected home, fixed price (and whether to report it alone), start/end
+times, the "hide empty hours" toggle and the language are saved in the browser's
 `localStorage`, so they come back on the next visit. **Reset saved settings**
 clears them and returns to the server-side defaults.
 
@@ -180,6 +182,12 @@ difference  = fixed total − spot total incl. VAT  (positive ⇒ fixed costs mo
 The difference is measured against the spot total *including* VAT, since that is
 what the spot contract actually costs.
 
+With **fixed price only**, the spot side is left out of every output — the
+columns, the totals, the difference and the VAT rate, which describes the spot
+price rather than the fixed one. A fixed cost needs nothing from the API but the
+metered consumption, so the two spot-only warnings (an undeducible VAT rate, and
+hours priced at 0 because the API returned no price) are not raised either.
+
 Prices cover **energy only** — grid rent, fixed monthly fees and production
 rewards are not part of the Tibber `cost` field and are not in the report.
 
@@ -205,6 +213,7 @@ All three `report` endpoints take the same body:
   "start": "2026-08-13T13:00",    // local wall clock
   "end": "2026-08-16T18:00",      // exclusive
   "fixed_price": 1.25,            // optional; per kWh, VAT does not apply
+  "fixed_only": false,            // optional; drop the spot comparison
   "timezone": "Europe/Oslo",      // optional; default is the home's own zone
   "token": "…",                   // optional; overrides TIBBER_TOKEN
   "lang": "nb"                    // optional; 'en' or 'nb'

@@ -34,6 +34,7 @@ function savePrefs() {
     endTime: $("end-time").value,
     fixedEnabled: $("fixed-enabled").checked,
     fixedPrice: $("fixed-price").value,
+    fixedOnly: $("fixed-only").checked,
     hideEmpty: $("hide-empty").checked,
   };
   try {
@@ -160,6 +161,7 @@ function buildRequest() {
     const price = parseFloat($("fixed-price").value);
     if (!Number.isFinite(price)) throw new Error(t("err.pick_price"));
     body.fixed_price = price;
+    body.fixed_only = $("fixed-only").checked;
   }
 
   const token = sessionToken();
@@ -197,14 +199,22 @@ function renderTiles(report) {
   const s = report.summary;
   const tiles = [
     { k: t("ui.tile_consumption"), v: fmt(s.totalConsumption, 2), u: "kWh" },
-    { k: t("ui.tile_spot_incl"), v: fmt(s.spot.inclVat), u: cur },
-    { k: t("ui.tile_spot_excl"), v: fmt(s.spot.exVat), u: cur },
-    {
-      k: t("ui.tile_avg"),
-      v: fmt(s.averageSpotPriceInclVat, 4),
-      u: `${cur}/kWh`,
-    },
   ];
+
+  if (report.fixedOnly) {
+    // Nothing to compare against: show the price and what it came to.
+    tiles.push({ k: t("ui.tile_price"), v: fmt(report.fixedPrice, 4), u: `${cur}/kWh` });
+    tiles.push({ k: t("ui.tile_fixed"), v: fmt(s.fixed.total), u: cur });
+    return paintTiles(tiles);
+  }
+
+  tiles.push({ k: t("ui.tile_spot_incl"), v: fmt(s.spot.inclVat), u: cur });
+  tiles.push({ k: t("ui.tile_spot_excl"), v: fmt(s.spot.exVat), u: cur });
+  tiles.push({
+    k: t("ui.tile_avg"),
+    v: fmt(s.averageSpotPriceInclVat, 4),
+    u: `${cur}/kWh`,
+  });
 
   if (s.fixed) {
     tiles.splice(3, 0, { k: t("ui.tile_fixed"), v: fmt(s.fixed.total), u: cur });
@@ -216,7 +226,10 @@ function renderTiles(report) {
       cls: diff >= 0 ? "pos" : "neg",
     });
   }
+  paintTiles(tiles);
+}
 
+function paintTiles(tiles) {
   $("tiles").innerHTML = tiles
     .map(
       (tile) => `<div class="tile"><div class="k">${tile.k}</div>
@@ -229,69 +242,87 @@ function renderSummary(report) {
   const cur = report.currency;
   const s = report.summary;
   const hasFixed = Boolean(s.fixed);
+  const hasSpot = !report.fixedOnly;
 
-  const head = `<thead><tr><th></th><th>${t("ui.head_spot", {
-    currency: cur,
-  })}</th>${hasFixed ? `<th>${t("ui.head_fixed", { currency: cur })}</th>` : ""}</tr></thead>`;
+  const head =
+    "<thead><tr><th></th>" +
+    (hasSpot ? `<th>${t("ui.head_spot", { currency: cur })}</th>` : "") +
+    (hasFixed ? `<th>${t("ui.head_fixed", { currency: cur })}</th>` : "") +
+    "</tr></thead>";
 
   const row = (label, spot, fixed) =>
-    `<tr><td>${label}</td><td>${fmt(spot)}</td>${
+    `<tr><td>${label}</td>${hasSpot ? `<td>${fmt(spot)}</td>` : ""}${
       hasFixed ? `<td>${fmt(fixed)}</td>` : ""
     }</tr>`;
 
   // The VAT split belongs to the spot price only: a fixed price is VAT-free,
   // so its column is blank until the total line.
+  const vatRows = hasSpot
+    ? row(t("ui.row_excl"), s.spot.exVat, null) +
+      row(t("ui.row_vat_rate", { rate: pct(report.vatRate) }), s.spot.vat, null)
+    : "";
+
   $("summary-table").innerHTML =
     head +
     "<tbody>" +
-    row(t("ui.row_excl"), s.spot.exVat, null) +
-    row(t("ui.row_vat_rate", { rate: pct(report.vatRate) }), s.spot.vat, null) +
-    row(t("ui.row_total"), s.spot.inclVat, s.fixed?.total) +
+    vatRows +
+    row(t("ui.row_total"), s.spot?.inclVat, s.fixed?.total) +
     "</tbody>";
 }
 
 function renderDetail(report) {
   const cur = report.currency;
   const hasFixed = report.fixedPrice !== null && report.fixedPrice !== undefined;
+  const hasSpot = !report.fixedOnly;
   const hideEmpty = $("hide-empty").checked;
   const rows = hideEmpty
     ? report.hours.filter((h) => (h.consumption || 0) > 0)
     : report.hours;
-  const columns = hasFixed ? 7 : 6;
+  const columns = 2 + (hasSpot ? 4 : 0) + (hasFixed ? 1 : 0);
+
+  const spotHead = hasSpot
+    ? `<th>${t("ui.col_unit_price", { currency: cur })}</th>
+       <th>${t("ui.col_excl", { currency: cur })}</th>
+       <th>${t("ui.col_vat", { currency: cur })}</th>
+       <th>${t("ui.col_incl", { currency: cur })}</th>`
+    : "";
 
   const head = `<thead><tr>
     <th>${t("ui.col_hour")}</th>
     <th>${t("ui.col_kwh")}</th>
-    <th>${t("ui.col_unit_price", { currency: cur })}</th>
-    <th>${t("ui.col_excl", { currency: cur })}</th>
-    <th>${t("ui.col_vat", { currency: cur })}</th>
-    <th>${t("ui.col_incl", { currency: cur })}</th>
+    ${spotHead}
     ${hasFixed ? `<th>${t("ui.col_fixed", { currency: cur })}</th>` : ""}
   </tr></thead>`;
 
   const body = rows
     .map((h) => {
       const dim = (h.consumption || 0) === 0 ? ' class="dim"' : "";
+      const spotCells = hasSpot
+        ? `<td>${fmt(h.unitPriceInclVat, 4)}</td>
+           <td>${fmt(h.spotCostExVat)}</td>
+           <td>${fmt(h.spotVat)}</td>
+           <td>${fmt(h.spotCostInclVat)}</td>`
+        : "";
       return `<tr${dim}>
         <td>${hourLabel(h.from)}</td>
         <td>${fmt(h.consumption, 3)}</td>
-        <td>${fmt(h.unitPriceInclVat, 4)}</td>
-        <td>${fmt(h.spotCostExVat)}</td>
-        <td>${fmt(h.spotVat)}</td>
-        <td>${fmt(h.spotCostInclVat)}</td>
+        ${spotCells}
         ${hasFixed ? `<td>${fmt(h.fixedCost)}</td>` : ""}
       </tr>`;
     })
     .join("");
 
   const s = report.summary;
+  const spotTotals = hasSpot
+    ? `<td></td>
+       <td>${fmt(s.spot.exVat)}</td>
+       <td>${fmt(s.spot.vat)}</td>
+       <td>${fmt(s.spot.inclVat)}</td>`
+    : "";
   const foot = `<tfoot><tr>
     <td>${hideEmpty ? t("ui.total_all") : t("ui.total")}</td>
     <td>${fmt(s.totalConsumption, 3)}</td>
-    <td></td>
-    <td>${fmt(s.spot.exVat)}</td>
-    <td>${fmt(s.spot.vat)}</td>
-    <td>${fmt(s.spot.inclVat)}</td>
+    ${spotTotals}
     ${hasFixed ? `<td>${fmt(s.fixed.total)}</td>` : ""}
   </tr></tfoot>`;
 
@@ -314,11 +345,16 @@ function renderReport(report) {
   const parts = [
     `${hourLabel(report.period.from)} → ${hourLabel(report.period.to)}`,
     t("ui.sub_hours", { count: report.period.hours }),
-    t("ui.sub_spot_vat", {
-      rate: pct(report.vatRate),
-      source: report.vatRateDerived ? t("ui.vat_from_api") : t("ui.vat_assumed"),
-    }),
   ];
+  // The VAT rate describes the spot price, which fixed-only reports leave out.
+  if (!report.fixedOnly) {
+    parts.push(
+      t("ui.sub_spot_vat", {
+        rate: pct(report.vatRate),
+        source: report.vatRateDerived ? t("ui.vat_from_api") : t("ui.vat_assumed"),
+      })
+    );
+  }
   if (report.fixedPrice !== null && report.fixedPrice !== undefined) {
     parts.push(
       t("ui.sub_fixed_price", {
@@ -327,6 +363,7 @@ function renderReport(report) {
       })
     );
   }
+  if (report.fixedOnly) parts.push(t("ui.sub_fixed_only"));
   $("result-sub").textContent = parts.join(" · ");
 
   renderTiles(report);
@@ -429,7 +466,8 @@ function applyQuickRange(kind) {
 }
 
 function toggleFixed() {
-  $("fixed-price").disabled = !$("fixed-enabled").checked;
+  const on = $("fixed-enabled").checked;
+  for (const id of ["fixed-price", "fixed-only"]) $(id).disabled = !on;
 }
 
 /* -------------------------------------------------------------- boot ---- */
@@ -492,6 +530,7 @@ function restorePrefs(prefs) {
   if (prefs.fixedEnabled) {
     $("fixed-enabled").checked = true;
     if (prefs.fixedPrice) $("fixed-price").value = prefs.fixedPrice;
+    if (prefs.fixedOnly) $("fixed-only").checked = true;
   }
   if (prefs.hideEmpty) $("hide-empty").checked = true;
   toggleFixed();
@@ -545,6 +584,7 @@ $("fixed-enabled").addEventListener("change", () => {
   toggleFixed();
   savePrefs();
 });
+$("fixed-only").addEventListener("change", savePrefs);
 $("dl-pdf").addEventListener("click", () => download("/api/report.pdf"));
 $("dl-csv").addEventListener("click", () => download("/api/report.csv"));
 $("dl-json").addEventListener("click", downloadJson);

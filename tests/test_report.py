@@ -38,7 +38,7 @@ def node(hour: int, consumption: float, unit_price: float, vat: float, cost=None
     }
 
 
-def make(nodes, start_hour=13, end_hour=16, fixed=None):
+def make(nodes, start_hour=13, end_hour=16, fixed=None, fixed_only=False):
     return build_report(
         home=HOME,
         nodes=nodes,
@@ -46,6 +46,7 @@ def make(nodes, start_hour=13, end_hour=16, fixed=None):
         end=datetime(2026, 8, 13, end_hour, tzinfo=OSLO),
         zone=OSLO,
         fixed_price=fixed,
+        fixed_only=fixed_only,
     )
 
 
@@ -144,6 +145,79 @@ def test_difference_compares_fixed_against_spot_incl_vat():
     nodes = [node(13, 10.0, 1.25, 0.25)]  # spot total 12.50 incl. VAT
     report = make(nodes, fixed=FixedPrice(price=2.00))
     assert report.difference == pytest.approx(7.5)
+
+
+# ---------------------------------------------------- fixed price only ----
+def test_fixed_only_leaves_the_spot_side_out_of_the_payload():
+    nodes = [node(13, 10.0, 1.25, 0.25)]
+    payload = make(nodes, fixed=FixedPrice(price=2.00), fixed_only=True).as_dict()
+
+    assert payload["fixedOnly"] is True
+    assert payload["summary"]["fixed"] == {"total": pytest.approx(20.0)}
+    for absent in ("vatRate", "vatRateDerived"):
+        assert absent not in payload
+    for absent in ("spot", "difference", "averageSpotPriceInclVat"):
+        assert absent not in payload["summary"]
+
+    hour = payload["hours"][0]
+    assert hour["fixedCost"] == pytest.approx(20.0)
+    assert hour["consumption"] == pytest.approx(10.0)
+    for absent in ("spotCostInclVat", "unitPriceInclVat", "spotVat", "estimated"):
+        assert absent not in hour
+
+
+def test_fixed_only_still_computes_the_spot_totals_internally():
+    """The flag hides the spot side; it must not corrupt the arithmetic."""
+    nodes = [node(13, 10.0, 1.25, 0.25)]
+    report = make(nodes, fixed=FixedPrice(price=2.00), fixed_only=True)
+    assert report.total_fixed == pytest.approx(20.0)
+    assert report.total_spot_incl_vat == pytest.approx(12.5)
+
+
+def test_fixed_only_is_ignored_without_a_fixed_price():
+    report = make([node(13, 10.0, 1.25, 0.25)], fixed_only=True)
+    assert report.fixed_only is False
+    assert report.as_dict()["summary"]["spot"]["inclVat"] == pytest.approx(12.5)
+
+
+def test_fixed_only_suppresses_the_spot_only_warnings():
+    """A missing spot price costs a fixed-price report nothing."""
+    n = node(13, 4.0, 1.25, 0.25)
+    n["unitPrice"] = None
+    n["unitPriceVAT"] = None
+    n["cost"] = None
+    report = make(
+        [n], start_hour=13, end_hour=14, fixed=FixedPrice(price=2.00), fixed_only=True
+    )
+    codes = [code for code, _ in report.warnings]
+    assert "warn.missing_price" not in codes
+    assert "warn.vat_assumed" not in codes
+    # The consumption is all a fixed cost needs, so it is still correct.
+    assert report.total_fixed == pytest.approx(8.0)
+
+
+def test_missing_price_still_warns_when_the_spot_side_is_shown():
+    n = node(13, 4.0, 1.25, 0.25)
+    n["unitPrice"] = None
+    n["unitPriceVAT"] = None
+    report = make([n], start_hour=13, end_hour=14, fixed=FixedPrice(price=2.00))
+    codes = [code for code, _ in report.warnings]
+    assert "warn.missing_price" in codes
+
+
+def test_fixed_only_exports_drop_the_spot_columns():
+    from app.exporters import to_csv, to_pdf
+
+    nodes = [node(h, 1.5, 1.25, 0.25) for h in (13, 14, 15)]
+    report = make(nodes, fixed=FixedPrice(price=1.10), fixed_only=True)
+
+    csv_text = to_csv(report)
+    assert "Fixed cost" in csv_text
+    assert "Spot" not in csv_text
+    assert "VAT rate" not in csv_text
+    assert "Difference" not in csv_text
+
+    assert to_pdf(report).startswith(b"%PDF")
 
 
 # -------------------------------------------------------------- output ----

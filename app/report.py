@@ -121,20 +121,27 @@ class HourRow:
     fixed_cost: float | None = None  # consumption x fixed price, no VAT
     estimated: bool = False  # cost computed locally, not returned by the API
 
-    def as_dict(self, locale: str | None = DEFAULT_LOCALE) -> dict:
-        return {
+    def as_dict(self, fixed_only: bool = False) -> dict:
+        row = {
             "from": self.start.isoformat(),
             "to": self.end.isoformat(),
             "consumption": self.consumption,
-            "unitPriceInclVat": self.unit_price_incl_vat,
-            "unitPriceExVat": self.unit_price_ex_vat,
-            "unitPriceVat": self.unit_price_vat,
-            "spotCostInclVat": self.spot_cost_incl_vat,
-            "spotCostExVat": self.spot_cost_ex_vat,
-            "spotVat": self.spot_vat,
-            "fixedCost": self.fixed_cost,
-            "estimated": self.estimated,
         }
+        if not fixed_only:
+            row.update(
+                {
+                    "unitPriceInclVat": self.unit_price_incl_vat,
+                    "unitPriceExVat": self.unit_price_ex_vat,
+                    "unitPriceVat": self.unit_price_vat,
+                    "spotCostInclVat": self.spot_cost_incl_vat,
+                    "spotCostExVat": self.spot_cost_ex_vat,
+                    "spotVat": self.spot_vat,
+                    "estimated": self.estimated,
+                }
+            )
+        if self.fixed_cost is not None:
+            row["fixedCost"] = self.fixed_cost
+        return row
 
 
 @dataclass
@@ -147,6 +154,8 @@ class Report:
     vat_rate: float
     vat_rate_derived: bool
     fixed_price: float | None = None  # per kWh, VAT does not apply
+    # Report the fixed price on its own, leaving the spot comparison out.
+    fixed_only: bool = False
     warnings: list[tuple[str, dict]] = field(default_factory=list)
     generated_at: datetime = field(default_factory=lambda: datetime.now().astimezone())
 
@@ -206,7 +215,33 @@ class Report:
         )
 
     def as_dict(self, locale: str | None = DEFAULT_LOCALE) -> dict:
-        return {
+        """The report as JSON-ready data.
+
+        In `fixed_only` mode the spot side is left out entirely -- including
+        the VAT rate, which describes the spot price and not the fixed one.
+        """
+        summary: dict = {"totalConsumption": self.total_consumption}
+        if not self.fixed_only:
+            summary["spot"] = {
+                "inclVat": self.total_spot_incl_vat,
+                "exVat": self.total_spot_ex_vat,
+                "vat": self.total_spot_vat,
+            }
+        if self.fixed_price is not None:
+            summary["fixed"] = {"total": self.total_fixed}
+        if not self.fixed_only:
+            summary["difference"] = self.difference
+            summary["averageSpotPriceInclVat"] = self.average_spot_price_incl_vat
+        summary["peakHour"] = (
+            None
+            if self.peak_row is None
+            else {
+                "from": self.peak_row.start.isoformat(),
+                "consumption": self.peak_row.consumption,
+            }
+        )
+
+        payload = {
             "home": self.home,
             "period": {
                 "from": self.start.isoformat(),
@@ -214,38 +249,19 @@ class Report:
                 "hours": len(self.rows),
             },
             "currency": self.currency,
-            "vatRate": self.vat_rate,
-            "vatRateDerived": self.vat_rate_derived,
+            "fixedOnly": self.fixed_only,
             "fixedPrice": self.fixed_price,
-            "summary": {
-                "totalConsumption": self.total_consumption,
-                "spot": {
-                    "inclVat": self.total_spot_incl_vat,
-                    "exVat": self.total_spot_ex_vat,
-                    "vat": self.total_spot_vat,
-                },
-                "fixed": (
-                    None
-                    if self.fixed_price is None
-                    else {"total": self.total_fixed}
-                ),
-                "difference": self.difference,
-                "averageSpotPriceInclVat": self.average_spot_price_incl_vat,
-                "peakHour": (
-                    None
-                    if self.peak_row is None
-                    else {
-                        "from": self.peak_row.start.isoformat(),
-                        "consumption": self.peak_row.consumption,
-                    }
-                ),
-            },
-            "hours": [r.as_dict() for r in self.rows],
+            "summary": summary,
+            "hours": [r.as_dict(self.fixed_only) for r in self.rows],
             "warnings": self.rendered_warnings(locale),
             "warningCodes": [code for code, _ in self.warnings],
             "generatedAt": self.generated_at.isoformat(),
             "label": self.label(),
         }
+        if not self.fixed_only:
+            payload["vatRate"] = self.vat_rate
+            payload["vatRateDerived"] = self.vat_rate_derived
+        return payload
 
 
 def build_report(
@@ -256,9 +272,15 @@ def build_report(
     end: datetime,
     zone: ZoneInfo,
     fixed_price: FixedPrice | None = None,
+    fixed_only: bool = False,
     currency_fallback: str = "NOK",
 ) -> Report:
-    """Filter `nodes` to [start, end) and compute per-hour and total figures."""
+    """Filter `nodes` to [start, end) and compute per-hour and total figures.
+
+    `fixed_only` reports the fixed price on its own and drops the spot
+    comparison; it needs a `fixed_price` to mean anything, and is ignored
+    without one.
+    """
     if end <= start:
         raise ReportError("err.end_before_start")
 
@@ -267,6 +289,7 @@ def build_report(
     vat_rate_derived = derived is not None
 
     fixed_unit_price = fixed_price.price if fixed_price is not None else None
+    fixed_only = fixed_only and fixed_unit_price is not None
 
     warnings: list[tuple[str, dict]] = []
     currency = currency_fallback
@@ -347,9 +370,12 @@ def build_report(
                 )
             )
 
-    if missing_price_hours:
+    # Both of these describe the spot side only: a fixed cost needs nothing
+    # from the API but the consumption, so neither is worth raising when the
+    # spot price is not reported.
+    if missing_price_hours and not fixed_only:
         warnings.append(("warn.missing_price", {"count": missing_price_hours}))
-    if rows and not vat_rate_derived:
+    if rows and not vat_rate_derived and not fixed_only:
         warnings.append(("warn.vat_assumed", {"rate": DEFAULT_VAT_RATE}))
 
     return Report(
@@ -361,5 +387,6 @@ def build_report(
         vat_rate=vat_rate,
         vat_rate_derived=vat_rate_derived,
         fixed_price=fixed_unit_price,
+        fixed_only=fixed_only,
         warnings=warnings,
     )

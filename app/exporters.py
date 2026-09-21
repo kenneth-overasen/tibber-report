@@ -77,6 +77,7 @@ def to_csv(report: Report, locale: str = DEFAULT_LOCALE) -> str:
     writer = csv.writer(buffer, delimiter=";")
     cur = report.currency
     has_fixed = report.fixed_price is not None
+    has_spot = not report.fixed_only
 
     writer.writerow([L.t("rep.csv_title")])
     writer.writerow([L.t("rep.home"), home_label(report, locale)])
@@ -86,13 +87,14 @@ def to_csv(report: Report, locale: str = DEFAULT_LOCALE) -> str:
         [L.t("rep.generated"), report.generated_at.strftime("%Y-%m-%d %H:%M %Z")]
     )
     writer.writerow([L.t("rep.currency"), cur])
-    writer.writerow(
-        [
-            L.t("rep.vat_rate"),
-            L.pct(report.vat_rate),
-            L.t("rep.derived") if report.vat_rate_derived else L.t("rep.assumed"),
-        ]
-    )
+    if has_spot:
+        writer.writerow(
+            [
+                L.t("rep.vat_rate"),
+                L.pct(report.vat_rate),
+                L.t("rep.derived") if report.vat_rate_derived else L.t("rep.assumed"),
+            ]
+        )
     if has_fixed:
         writer.writerow([L.t("rep.fixed_override"), _fixed_price_detail(report, L)])
     writer.writerow([])
@@ -100,36 +102,41 @@ def to_csv(report: Report, locale: str = DEFAULT_LOCALE) -> str:
     writer.writerow([L.t("rep.summary")])
     writer.writerow([L.t("rep.hours_with_data"), len(report.rows)])
     writer.writerow([L.t("rep.total_consumption"), L.n(report.total_consumption, 3)])
-    writer.writerow(
-        [L.t("rep.spot_total_incl", currency=cur), L.n(report.total_spot_incl_vat)]
-    )
-    writer.writerow(
-        [L.t("rep.spot_total_excl", currency=cur), L.n(report.total_spot_ex_vat)]
-    )
-    writer.writerow([L.t("rep.spot_vat", currency=cur), L.n(report.total_spot_vat)])
-    writer.writerow(
-        [
-            L.t("rep.avg_price", currency=cur),
-            L.n(report.average_spot_price_incl_vat, 4),
-        ]
-    )
+    if has_spot:
+        writer.writerow(
+            [L.t("rep.spot_total_incl", currency=cur), L.n(report.total_spot_incl_vat)]
+        )
+        writer.writerow(
+            [L.t("rep.spot_total_excl", currency=cur), L.n(report.total_spot_ex_vat)]
+        )
+        writer.writerow([L.t("rep.spot_vat", currency=cur), L.n(report.total_spot_vat)])
+        writer.writerow(
+            [
+                L.t("rep.avg_price", currency=cur),
+                L.n(report.average_spot_price_incl_vat, 4),
+            ]
+        )
     if has_fixed:
         writer.writerow([L.t("rep.fixed_total", currency=cur), L.n(report.total_fixed)])
-        writer.writerow(
-            [L.t("rep.difference", currency=cur), L.n(report.difference)]
-        )
+        if has_spot:
+            writer.writerow(
+                [L.t("rep.difference", currency=cur), L.n(report.difference)]
+            )
     writer.writerow([])
 
     header = [
         L.t("rep.from_col"),
         L.t("rep.to_col"),
         f"{L.t('rep.consumption')} (kWh)",
-        L.t("rep.unit_price_incl", currency=cur),
-        L.t("rep.unit_price_excl", currency=cur),
-        L.t("rep.spot_cost_incl", currency=cur),
-        L.t("rep.spot_cost_excl", currency=cur),
-        L.t("rep.spot_cost_vat", currency=cur),
     ]
+    if has_spot:
+        header += [
+            L.t("rep.unit_price_incl", currency=cur),
+            L.t("rep.unit_price_excl", currency=cur),
+            L.t("rep.spot_cost_incl", currency=cur),
+            L.t("rep.spot_cost_excl", currency=cur),
+            L.t("rep.spot_cost_vat", currency=cur),
+        ]
     if has_fixed:
         header.append(L.t("rep.fixed_cost", currency=cur))
     writer.writerow([L.t("rep.hourly_detail")])
@@ -140,12 +147,15 @@ def to_csv(report: Report, locale: str = DEFAULT_LOCALE) -> str:
             row.start.strftime("%Y-%m-%d %H:%M"),
             row.end.strftime("%Y-%m-%d %H:%M"),
             L.n(row.consumption, 3),
-            L.n(row.unit_price_incl_vat, 4),
-            L.n(row.unit_price_ex_vat, 4),
-            L.n(row.spot_cost_incl_vat),
-            L.n(row.spot_cost_ex_vat),
-            L.n(row.spot_vat),
         ]
+        if has_spot:
+            line += [
+                L.n(row.unit_price_incl_vat, 4),
+                L.n(row.unit_price_ex_vat, 4),
+                L.n(row.spot_cost_incl_vat),
+                L.n(row.spot_cost_ex_vat),
+                L.n(row.spot_vat),
+            ]
         if has_fixed:
             line.append(L.n(row.fixed_cost))
         writer.writerow(line)
@@ -154,12 +164,15 @@ def to_csv(report: Report, locale: str = DEFAULT_LOCALE) -> str:
         L.t("rep.total"),
         "",
         L.n(report.total_consumption, 3),
-        "",
-        "",
-        L.n(report.total_spot_incl_vat),
-        L.n(report.total_spot_ex_vat),
-        L.n(report.total_spot_vat),
     ]
+    if has_spot:
+        total_line += [
+            "",
+            "",
+            L.n(report.total_spot_incl_vat),
+            L.n(report.total_spot_ex_vat),
+            L.n(report.total_spot_vat),
+        ]
     if has_fixed:
         total_line.append(L.n(report.total_fixed))
     writer.writerow(total_line)
@@ -210,8 +223,9 @@ def _meta_table(report: Report, st: dict, L: Loc) -> Table:
         ],
         [L.t("rep.hours_with_data"), str(len(report.rows))],
         [L.t("rep.currency"), report.currency],
-        [L.t("rep.vat_rate"), f"{L.pct(report.vat_rate)} ({vat_note})"],
     ]
+    if not report.fixed_only:
+        rows.append([L.t("rep.vat_rate"), f"{L.pct(report.vat_rate)} ({vat_note})"])
     if report.fixed_price is not None:
         rows.append([L.t("rep.fixed_override"), _fixed_price_detail(report, L)])
     rows.append(
@@ -239,8 +253,11 @@ def _meta_table(report: Report, st: dict, L: Loc) -> Table:
 def _summary_table(report: Report, st: dict, L: Loc) -> Table:
     cur = report.currency
     has_fixed = report.fixed_price is not None
+    has_spot = not report.fixed_only
 
-    head = ["", L.t("rep.spot_currency", currency=cur)]
+    head = [""]
+    if has_spot:
+        head.append(L.t("rep.spot_currency", currency=cur))
     if has_fixed:
         head.append(L.t("rep.fixed_currency", currency=cur))
     data = [head]
@@ -248,20 +265,27 @@ def _summary_table(report: Report, st: dict, L: Loc) -> Table:
     vat_label = f"{L.t('rep.vat')} ({L.pct(report.vat_rate)})"
 
     def line(label: str, spot, fixed):
-        row = [label, L.n(spot)]
+        row = [label]
+        if has_spot:
+            row.append(L.n(spot))
         if has_fixed:
             row.append(L.n(fixed))
         return row
 
     # The VAT split applies to the spot price only; a fixed price is VAT-free,
     # so those two cells stay empty and only the total lines up.
-    data.append(line(L.t("rep.excl_vat"), report.total_spot_ex_vat, None))
-    data.append(line(vat_label, report.total_spot_vat, None))
+    if has_spot:
+        data.append(line(L.t("rep.excl_vat"), report.total_spot_ex_vat, None))
+        data.append(line(vat_label, report.total_spot_vat, None))
     data.append(
         line(L.t("rep.total_cost"), report.total_spot_incl_vat, report.total_fixed)
     )
 
-    widths = [60 * mm, 40 * mm] + ([40 * mm] if has_fixed else [])
+    widths = (
+        [60 * mm]
+        + ([40 * mm] if has_spot else [])
+        + ([40 * mm] if has_fixed else [])
+    )
     table = Table(data, colWidths=widths, hAlign="LEFT")
     table.setStyle(
         TableStyle(
@@ -286,10 +310,17 @@ def _summary_table(report: Report, st: dict, L: Loc) -> Table:
 def _headline_table(report: Report, st: dict, L: Loc) -> Table:
     cur = report.currency
     avg = report.average_spot_price_incl_vat
-    tiles = [
-        (L.t("rep.consumption"), f"{L.n(report.total_consumption, 2)} kWh"),
-        (L.t("rep.spot_tile"), f"{L.n(report.total_spot_incl_vat)} {cur}"),
-    ]
+    tiles = [(L.t("rep.consumption"), f"{L.n(report.total_consumption, 2)} kWh")]
+
+    if report.fixed_only:
+        # Nothing to compare against: show what the price was and what it cost.
+        tiles.append(
+            (L.t("rep.price_tile"), f"{L.n(report.fixed_price, 4)} {cur}/kWh")
+        )
+        tiles.append((L.t("rep.fixed_tile"), f"{L.n(report.total_fixed)} {cur}"))
+        return _tile_table(tiles, st)
+
+    tiles.append((L.t("rep.spot_tile"), f"{L.n(report.total_spot_incl_vat)} {cur}"))
     if report.fixed_price is not None:
         diff = report.difference or 0.0
         sign = "+" if diff >= 0 else "-"
@@ -304,7 +335,11 @@ def _headline_table(report: Report, st: dict, L: Loc) -> Table:
                 f"{L.n(avg, 4)} {cur}/kWh" if avg is not None else "-",
             )
         )
+    return _tile_table(tiles, st)
 
+
+def _tile_table(tiles: list[tuple[str, str]], st: dict) -> Table:
+    """Lay an even row of label/value tiles across the page."""
     width = (178 / len(tiles)) * mm
     header = [
         Paragraph(f'<font color="#6b7785" size="7">{label.upper()}</font>', st["cell"])
@@ -335,15 +370,16 @@ def _headline_table(report: Report, st: dict, L: Loc) -> Table:
 def _detail_table(report: Report, st: dict, L: Loc) -> Table:
     cur = report.currency
     has_fixed = report.fixed_price is not None
+    has_spot = not report.fixed_only
 
-    header = [
-        L.t("rep.hour"),
-        L.t("rep.kwh"),
-        L.t("rep.unit_price_short", currency=cur),
-        L.t("rep.excl_vat"),
-        L.t("rep.vat"),
-        L.t("rep.incl_vat"),
-    ]
+    header = [L.t("rep.hour"), L.t("rep.kwh")]
+    if has_spot:
+        header += [
+            L.t("rep.unit_price_short", currency=cur),
+            L.t("rep.excl_vat"),
+            L.t("rep.vat"),
+            L.t("rep.incl_vat"),
+        ]
     if has_fixed:
         header.append(L.t("rep.fixed_short"))
 
@@ -357,11 +393,14 @@ def _detail_table(report: Report, st: dict, L: Loc) -> Table:
         line = [
             row.start.strftime("%Y-%m-%d %H:%M"),
             L.n(row.consumption, 3),
-            L.n(row.unit_price_incl_vat, 4),
-            L.n(row.spot_cost_ex_vat),
-            L.n(row.spot_vat),
-            L.n(row.spot_cost_incl_vat),
         ]
+        if has_spot:
+            line += [
+                L.n(row.unit_price_incl_vat, 4),
+                L.n(row.spot_cost_ex_vat),
+                L.n(row.spot_vat),
+                L.n(row.spot_cost_incl_vat),
+            ]
         if has_fixed:
             line.append(L.n(row.fixed_cost))
         data.append(line)
@@ -369,16 +408,21 @@ def _detail_table(report: Report, st: dict, L: Loc) -> Table:
     total = [
         L.t("rep.total"),
         L.n(report.total_consumption, 3),
-        "",
-        L.n(report.total_spot_ex_vat),
-        L.n(report.total_spot_vat),
-        L.n(report.total_spot_incl_vat),
     ]
+    if has_spot:
+        total += [
+            "",
+            L.n(report.total_spot_ex_vat),
+            L.n(report.total_spot_vat),
+            L.n(report.total_spot_incl_vat),
+        ]
     if has_fixed:
         total.append(L.n(report.total_fixed))
     data.append(total)
 
-    widths = [34 * mm, 20 * mm, 24 * mm, 24 * mm, 20 * mm, 24 * mm]
+    widths = [34 * mm, 20 * mm]
+    if has_spot:
+        widths += [24 * mm, 24 * mm, 20 * mm, 24 * mm]
     if has_fixed:
         widths.append(26 * mm)
 
@@ -452,7 +496,8 @@ def to_pdf(report: Report, locale: str = DEFAULT_LOCALE) -> bytes:
         for warning in rendered_warnings:
             story.append(Paragraph(f"&bull; {warning}", st["note"]))
 
-    story += [Spacer(1, 6), Paragraph(L.t("rep.disclaimer"), st["note"])]
+    disclaimer = "rep.disclaimer_fixed" if report.fixed_only else "rep.disclaimer"
+    story += [Spacer(1, 6), Paragraph(L.t(disclaimer), st["note"])]
 
     if report.rows:
         story += [
